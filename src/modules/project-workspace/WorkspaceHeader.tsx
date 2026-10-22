@@ -96,9 +96,9 @@ export default function WorkspaceHeader({
   };
 
   return (
-    <header className="pwa-header-safe flex-shrink-0 border-b border-border/60 bg-background/95 px-3 py-1.5 backdrop-blur-sm sm:px-4 sm:py-2">
-      <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-        <div className="flex min-w-0 items-center gap-2 sm:max-w-[min(34%,24rem)] sm:flex-[1_1_18rem]">
+    <header className="pwa-header-safe flex-shrink-0 border-b border-border/60 bg-background/95 px-2 py-1 backdrop-blur-sm sm:px-4 sm:py-2">
+      <div className="flex min-w-0 flex-row items-center gap-2 sm:gap-3">
+        <div className="flex min-w-0 max-w-[45%] items-center gap-2 sm:max-w-[min(34%,24rem)] sm:flex-[1_1_18rem]">
           {isMobile && <MobileMenuButton onMenuClick={onMenuClick} />}
           <WorkspaceTitle
             activeTab={activeTab}
@@ -110,7 +110,7 @@ export default function WorkspaceHeader({
           <WorkspaceConnectionStatus />
         </div>
 
-        <div className="-mx-3 min-w-0 sm:mx-0 sm:flex-1">
+        <div className="min-w-0 flex-1">
           <div className="relative ml-auto w-fit max-w-full">
             {canScrollLeft && (
               <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-background via-background/90 to-transparent" />

@@ -41,6 +41,19 @@ type PtySessionEntry = {
 };
 
 const ptySessionsMap = new Map<string, PtySessionEntry>();
+
+// mine: ignore bogus/transient sizes and no-op resizes (each resize makes TUIs redraw).
+export function resizePtyIfChanged(target: IPty | null | undefined, rawCols: unknown, rawRows: unknown): boolean {
+  if (!target) return false;
+  const cols = Math.floor(Number(rawCols));
+  const rows = Math.floor(Number(rawRows));
+  if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 20 || rows < 5 || cols > 1000 || rows > 500) {
+    return false;
+  }
+  if (target.cols === cols && target.rows === rows) return false;
+  target.resize(cols, rows);
+  return true;
+}
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 const SHELL_URL_PARSE_BUFFER_LIMIT = 32768;
 const TRAILING_URL_PUNCTUATION_REGEX = /[)\]}>.,;:!?]+$/;
@@ -542,6 +555,7 @@ export function handleShellConnection(
 
   let shellProcess: IPty | null = null;
   let ptySessionKey: string | null = null;
+  let clientSize: { cols: unknown; rows: unknown } | null = null;
   let urlDetectionBuffer = '';
   const announcedAuthUrls = new Set<string>();
 
@@ -558,6 +572,7 @@ export function handleShellConnection(
         const hasSession = readBoolean(data.hasSession);
         const provider = readString(data.provider, 'claude');
         const initialCommand = readString(data.initialCommand);
+        clientSize = { cols: data.cols, rows: data.rows };
         const forceRestart = readBoolean(data.forceRestart);
         const colorScheme = readColorScheme(data.colorScheme);
         const isPlainShell =
@@ -619,6 +634,8 @@ export function handleShellConnection(
           }
 
           existingSession.ws = ws;
+          // mine: the newest client owns the PTY size; adopt its geometry once on attach.
+          resizePtyIfChanged(existingSession.pty, data.cols, data.rows);
           sendClaudeColorScheme(ws, existingSession.claudeColorScheme);
           return;
         }
@@ -814,14 +831,29 @@ export function handleShellConnection(
 
       if (data.type === 'input') {
         if (shellProcess) {
+          // mine: typing in a client that lost the PTY to another device takes it back
+          // (output + size follow the most recently active client, no ping-pong).
+          const owner = ptySessionKey ? ptySessionsMap.get(ptySessionKey) : undefined;
+          if (owner && owner.pty === shellProcess && owner.ws !== ws && ws.readyState === WebSocket.OPEN) {
+            owner.ws = ws;
+            if (clientSize) resizePtyIfChanged(shellProcess, clientSize.cols, clientSize.rows);
+          }
           shellProcess.write(readString(data.data));
         }
         return;
       }
 
       if (data.type === 'resize') {
+        clientSize = { cols: data.cols, rows: data.rows };
         if (shellProcess) {
-          shellProcess.resize(readNumber(data.cols, 80), readNumber(data.rows, 24));
+          // mine: only the client that currently owns the PTY may resize it. Otherwise a
+          // phone and a desktop attached to the same session ping-pong the PTY size and
+          // the TUI keeps redrawing at different widths.
+          const owner = ptySessionKey ? ptySessionsMap.get(ptySessionKey) : undefined;
+          if (owner && owner.ws !== ws) {
+            return;
+          }
+          resizePtyIfChanged(shellProcess, data.cols, data.rows);
         }
       }
     } catch (error) {

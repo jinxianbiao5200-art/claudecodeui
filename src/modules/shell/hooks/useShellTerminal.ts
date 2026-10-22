@@ -16,7 +16,30 @@ import { sendSocketMessage } from '@/modules/shell/utils/socket';
 import { SHELL_PASTE_FILES_EVENT } from '@/modules/shell/utils/shellUpload';
 import { ensureXtermFocusStyles } from '@/modules/shell/utils/terminalStyles';
 
-const TERMINAL_RESIZE_DELAY_MS = 50;
+const TERMINAL_RESIZE_DELAY_MS = 150;
+
+// mine: fit + send resize only when the grid really changed and the container is visible.
+// Avoids a resize storm (iOS viewport/toolbar changes, hidden tabs measuring 0px) that made
+// the Claude Code TUI redraw its bottom status area at alternating sizes.
+const lastSentSize = new WeakMap<object, { cols: number; rows: number }>();
+function fitAndSendResize(
+  fitAddon: { fit: () => void; proposeDimensions?: () => { cols: number; rows: number } | undefined },
+  terminal: { cols: number; rows: number; element?: HTMLElement },
+  ws: WebSocket | null,
+  send: (ws: WebSocket | null, msg: { type: 'resize'; cols: number; rows: number }) => void,
+  force = false,
+): void {
+  const el = terminal.element?.parentElement ?? terminal.element;
+  if (el && (el.clientWidth < 40 || el.clientHeight < 40)) return;
+  const proposed = fitAddon.proposeDimensions?.();
+  if (proposed && (!Number.isFinite(proposed.cols) || proposed.cols < 20 || proposed.rows < 5)) return;
+  fitAddon.fit();
+  if (!ws) return;
+  const prev = lastSentSize.get(ws);
+  if (!force && prev && prev.cols === terminal.cols && prev.rows === terminal.rows) return;
+  lastSentSize.set(ws, { cols: terminal.cols, rows: terminal.rows });
+  send(ws, { type: 'resize', cols: terminal.cols, rows: terminal.rows });
+}
 
 const TERMINAL_OPTIONS: ITerminalOptions = {
   cursorBlink: true,
@@ -263,12 +286,7 @@ export function useShellTerminal({
 
           const currentFitAddon = fitAddonRef.current;
           if (currentFitAddon) {
-            currentFitAddon.fit();
-            sendSocketMessage(wsRef.current, {
-              type: 'resize',
-              cols: nextTerminal.cols,
-              rows: nextTerminal.rows,
-            });
+            fitAndSendResize(currentFitAddon, nextTerminal, wsRef.current, sendSocketMessage);
           } else {
             nextTerminal.refresh(0, nextTerminal.rows - 1);
           }
@@ -384,12 +402,7 @@ export function useShellTerminal({
         return;
       }
 
-      currentFitAddon.fit();
-      sendSocketMessage(wsRef.current, {
-        type: 'resize',
-        cols: currentTerminal.cols,
-        rows: currentTerminal.rows,
-      });
+      fitAndSendResize(currentFitAddon, currentTerminal, wsRef.current, sendSocketMessage, true);
     }, TERMINAL_INIT_DELAY_MS);
 
     setIsInitialized(true);
@@ -413,12 +426,7 @@ export function useShellTerminal({
           return;
         }
 
-        currentFitAddon.fit();
-        sendSocketMessage(wsRef.current, {
-          type: 'resize',
-          cols: currentTerminal.cols,
-          rows: currentTerminal.rows,
-        });
+        fitAndSendResize(currentFitAddon, currentTerminal, wsRef.current, sendSocketMessage);
       }, TERMINAL_RESIZE_DELAY_MS);
     });
 

@@ -57,13 +57,13 @@ export default function ShellHeader({
 }: ShellHeaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="flex-shrink-0 border-b border-border bg-card px-4 py-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+    <div className="flex-shrink-0 border-b border-border bg-card px-2 py-1 md:px-4 md:py-2">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-center space-x-2">
+          <div className={`h-2 w-2 flex-shrink-0 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
 
           {hasSession && sessionDisplayNameShort && (
-            <span className="text-xs text-blue-600 dark:text-blue-300">({sessionDisplayNameShort}...)</span>
+            <span className="min-w-0 truncate text-xs text-blue-600 dark:text-blue-300">({sessionDisplayNameShort}...)</span>
           )}
 
           {!hasSession && <span className="text-xs text-muted-foreground">{statusNewSessionText}</span>}
@@ -73,7 +73,7 @@ export default function ShellHeader({
           {isRestarting && <span className="text-xs text-blue-600 dark:text-blue-400">{statusRestartingText}</span>}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-shrink-0 items-center gap-1 md:gap-2">
           {onPickFiles && (
             <>
               <input
@@ -90,7 +90,7 @@ export default function ShellHeader({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disableAttach}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-7 items-center gap-1.5 md:h-8 rounded-md border border-input bg-background px-2 text-xs md:px-2.5 font-medium text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                 title="上传文件/图片，路径会填进终端"
                 aria-label="上传文件"
               >
@@ -104,19 +104,20 @@ export default function ShellHeader({
               type="button"
               onClick={onToggleBypass}
               aria-pressed={bypassEnabled}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-card ${
+              className={`inline-flex h-7 items-center gap-1.5 md:h-8 rounded-md border px-2 text-xs md:px-3 font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-card ${
                 bypassEnabled
                   ? 'border-orange-700 bg-orange-700 text-white hover:bg-orange-800 focus:ring-orange-400/70 dark:border-orange-500/70 dark:bg-orange-600/80 dark:hover:bg-orange-700'
                   : 'border-input bg-background text-foreground shadow-sm hover:border-orange-700 hover:bg-orange-700 hover:text-white focus:ring-orange-400/70 dark:hover:border-orange-400/70 dark:hover:bg-orange-600/60'
               }`}
               title={bypassTitle}
+              aria-label={bypassLabel}
             >
               {bypassEnabled ? (
                 <ShieldOff className="h-3.5 w-3.5" aria-hidden="true" />
               ) : (
                 <Shield className="h-3.5 w-3.5" aria-hidden="true" />
               )}
-              <span>{bypassLabel}</span>
+              <span className="hidden md:inline">{bypassLabel}</span>
             </button>
           )}
 
@@ -124,11 +125,12 @@ export default function ShellHeader({
             <button
               type="button"
               onClick={onDisconnect}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400/70 focus:ring-offset-2 focus:ring-offset-card"
+              className="inline-flex h-7 items-center gap-1.5 md:h-8 rounded-md bg-red-600 px-2 text-xs md:px-3 font-medium text-white transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400/70 focus:ring-offset-2 focus:ring-offset-card"
               title={disconnectTitle}
+              aria-label={disconnectLabel}
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>{disconnectLabel}</span>
+              <span className="hidden md:inline">{disconnectLabel}</span>
             </button>
           )}
 
@@ -136,11 +138,12 @@ export default function ShellHeader({
             type="button"
             onClick={onRestart}
             disabled={disableRestart}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-blue-400/70 hover:bg-blue-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-400/70 focus:ring-offset-2 focus:ring-offset-card disabled:cursor-not-allowed disabled:border-transparent disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-60 disabled:shadow-none"
+            className="inline-flex h-7 items-center gap-1.5 md:h-8 rounded-md border border-input bg-background px-2 text-xs md:px-3 font-medium text-foreground shadow-sm transition-colors hover:border-blue-400/70 hover:bg-blue-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-400/70 focus:ring-offset-2 focus:ring-offset-card disabled:cursor-not-allowed disabled:border-transparent disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-60 disabled:shadow-none"
             title={restartTitle}
+            aria-label={restartLabel}
           >
             <RotateCcw className={`h-3.5 w-3.5 ${isRestarting ? 'animate-spin' : ''}`} aria-hidden="true" />
-            <span>{restartLabel}</span>
+            <span className="hidden md:inline">{restartLabel}</span>
           </button>
         </div>
       </div>
