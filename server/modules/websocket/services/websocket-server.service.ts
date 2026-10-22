@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer, type VerifyClientCallbackSync } from 'ws';
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { verifyWebSocketClient } from '@/modules/websocket/services/websocket-auth.service.js';
 import { handlePluginWsProxy } from '@/modules/websocket/services/plugin-websocket-proxy.service.js';
-import { handleShellConnection } from '@/modules/websocket/services/shell-websocket.service.js';
+import { handleShellConnection, shellSocketMeta } from '@/modules/websocket/services/shell-websocket.service.js';
 import { handleDesktopNotificationsConnection } from '@/modules/notifications/index.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 
@@ -59,6 +59,10 @@ export function attachWebSocketHeartbeat(
     // A socket that did not answer the previous ping is half-open from the
     // server's perspective. Terminating it emits close and lets clients resume.
     if (!isAlive) {
+      // mine: lets the shell close log say this was a ping timeout.
+      const meta = shellSocketMeta.get(ws);
+      if (meta) meta.heartbeatKilled = true;
+      console.log(`[WARN] ${new Date().toISOString()} websocket heartbeat timeout, terminating remote=${meta?.remote ?? 'n/a'}`);
       stopHeartbeat();
       ws.terminate();
       return;
@@ -99,6 +103,7 @@ export function createWebSocketServer(
     const pathname = new URL(url, 'http://localhost').pathname;
 
     if (pathname === '/shell') {
+      shellSocketMeta.set(ws, { remote: `${incomingRequest.socket?.remoteAddress ?? '?'}:${incomingRequest.socket?.remotePort ?? '?'}` });
       handleShellConnection(ws, dependencies.shell);
       return;
     }

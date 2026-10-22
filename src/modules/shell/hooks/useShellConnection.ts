@@ -73,6 +73,9 @@ export function useShellConnection({
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const clearOnNextOpenRef = useRef(false);
+  // mine: last output chunk seen, so a reconnect can ask for only what it missed.
+  const lastSeqRef = useRef<number | null>(null);
+  const ptyIdRef = useRef<string | null>(null);
 
   const handleProcessCompletion = useCallback(
     (output: string) => {
@@ -108,7 +111,27 @@ export function useShellConnection({
         return;
       }
 
+      if (message.type === 'replay') {
+        const isFull = message.mode !== 'delta';
+        if (isFull) {
+          // mine: full replay always starts from a reset terminal at the PTY's size, so
+          // the buffered TUI output is not drawn over old screen content or at a wrong width.
+          const term = terminalRef.current;
+          if (term) {
+            term.reset();
+            const cols = Number(message.cols);
+            const rows = Number(message.rows);
+            if (cols > 0 && rows > 0 && (term.cols !== cols || term.rows !== rows)) term.resize(cols, rows);
+          }
+        }
+        clearOnNextOpenRef.current = false;
+        ptyIdRef.current = typeof message.ptyId === 'string' ? message.ptyId : null;
+        if (isFull) lastSeqRef.current = null;
+        return;
+      }
+
       if (message.type === 'output') {
+        { const seq = (message as { seq?: unknown }).seq; if (typeof seq === 'number') lastSeqRef.current = seq; }
         const output = typeof message.data === 'string' ? message.data : '';
         handleProcessCompletion(output);
         terminalRef.current?.write(output);
@@ -158,7 +181,7 @@ export function useShellConnection({
         setClaudeLaunchColorScheme(colorScheme === 'light' || colorScheme === 'dark' ? colorScheme : null);
       }
     },
-    [fitAddonRef, handleProcessCompletion, onOutputRef, terminalRef, wsRef],
+    [clearTerminalScreen, fitAddonRef, handleProcessCompletion, onOutputRef, terminalRef, wsRef],
   );
 
   const connectWebSocket = useCallback(
@@ -182,10 +205,10 @@ export function useShellConnection({
 
         socket.onopen = () => {
           reconnectAttemptRef.current = 0;
-          if (clearOnNextOpenRef.current) {
-            // the server replays its buffer on reattach; start from a clean screen.
+          if (clearOnNextOpenRef.current && !ptyIdRef.current) {
+            // server without resumable replay (older build): it replays everything, so reset first.
             clearOnNextOpenRef.current = false;
-            clearTerminalScreen();
+            terminalRef.current?.reset();
           }
           setIsConnected(true);
           setIsConnecting(false);
@@ -214,6 +237,10 @@ export function useShellConnection({
               provider: isPlainShellRef.current ? 'plain-shell' : (selectedSessionRef.current?.__provider || launch?.provider || readSelectedProvider()),
               cols: currentTerminal.cols,
               rows: currentTerminal.rows,
+              // mine: delta replay on reconnect (server falls back to full when it cannot).
+              ...(clearOnNextOpenRef.current && ptyIdRef.current && lastSeqRef.current !== null
+                ? { resumePtyId: ptyIdRef.current, resumeSeq: lastSeqRef.current }
+                : {}),
               initialCommand: initialCommandRef.current,
               isPlainShell: isPlainShellRef.current,
               forceRestart,
@@ -297,6 +324,8 @@ export function useShellConnection({
 
   const disconnectFromShell = useCallback((options?: { suppressAutoConnect?: boolean }) => {
     wantReconnectRef.current = false;
+    lastSeqRef.current = null;
+    ptyIdRef.current = null;
     reconnectAttemptRef.current = 0;
     clearOnNextOpenRef.current = false;
     if (reconnectTimerRef.current !== null) {

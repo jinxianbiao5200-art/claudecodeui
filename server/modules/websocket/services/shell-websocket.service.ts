@@ -32,6 +32,9 @@ type PtySessionEntry = {
   ws: WebSocket | null;
   // mine: other attached clients that only watch (receive output, never resize).
   viewers?: Set<WebSocket>;
+  // mine: resumable replay. seq of the last chunk pushed; buffer[i] has seq bufferEndSeq-len+1+i.
+  ptyId?: string;
+  bufferEndSeq?: number;
   buffer: string[];
   timeoutId: NodeJS.Timeout | null;
   projectPath: string;
@@ -43,6 +46,13 @@ type PtySessionEntry = {
 };
 
 const ptySessionsMap = new Map<string, PtySessionEntry>();
+
+// mine: per-socket diagnostics (remote address, killed by heartbeat).
+export const shellSocketMeta = new WeakMap<object, { remote?: string; heartbeatKilled?: boolean }>();
+
+function ts(): string {
+  return new Date().toISOString();
+}
 
 // mine: every open socket attached to a PTY (owner first, then viewers).
 function attachedSockets(session: PtySessionEntry): WebSocket[] {
@@ -569,7 +579,9 @@ export function handleShellConnection(
   ws: WebSocket,
   dependencies: ShellWebSocketDependencies
 ): void {
-  console.log('[INFO] Shell websocket connected');
+  const connectedAt = Date.now();
+  const remote = shellSocketMeta.get(ws)?.remote ?? 'unknown';
+  console.log(`[INFO] ${ts()} Shell websocket connected remote=${remote}`);
 
   let shellProcess: IPty | null = null;
   let ptySessionKey: string | null = null;
@@ -633,23 +645,36 @@ export function handleShellConnection(
             existingSession.timeoutId = null;
           }
 
-          ws.send(
-            JSON.stringify({
-              type: 'output',
-              data: '\x1b[36m[Reconnected to existing session]\x1b[0m\r\n',
-            })
-          );
+          // mine: resume from the client's last seen chunk when possible (no full redraw).
+          const endSeq = existingSession.bufferEndSeq ?? existingSession.buffer.length;
+          const startSeq = endSeq - existingSession.buffer.length + 1;
+          const resumeSeq = Number((data as Record<string, unknown>).resumeSeq);
+          const canDelta =
+            typeof (data as Record<string, unknown>).resumePtyId === 'string' &&
+            (data as Record<string, unknown>).resumePtyId === existingSession.ptyId &&
+            Number.isFinite(resumeSeq) && resumeSeq >= startSeq - 1 && resumeSeq <= endSeq;
+          ws.send(JSON.stringify({ type: 'replay', mode: canDelta ? 'delta' : 'full', ptyId: existingSession.ptyId, seq: endSeq, cols: existingSession.pty.cols, rows: existingSession.pty.rows }));
+          console.log(`[INFO] ${ts()} Shell reattach key=${ptySessionKey} remote=${remote} replay=${canDelta ? `delta(${endSeq - resumeSeq})` : `full(${existingSession.buffer.length})`}`);
 
-          if (existingSession.buffer.length > 0) {
-            existingSession.buffer.forEach((bufferedData) => {
-              ws.send(
-                JSON.stringify({
-                  type: 'output',
-                  data: bufferedData,
-                })
-              );
-            });
+          if (!canDelta) {
+            ws.send(
+              JSON.stringify({
+                type: 'output',
+                data: '\x1b[36m[Reconnected to existing session]\x1b[0m\r\n',
+              })
+            );
           }
+
+          const fromIndex = canDelta ? existingSession.buffer.length - (endSeq - resumeSeq) : 0;
+          existingSession.buffer.slice(fromIndex).forEach((bufferedData, offset) => {
+            ws.send(
+              JSON.stringify({
+                type: 'output',
+                data: bufferedData,
+                seq: startSeq + fromIndex + offset,
+              })
+            );
+          });
 
           // mine: attaching never steals an active owner; it joins as a viewer.
           const currentOwner = existingSession.ws;
@@ -661,6 +686,19 @@ export function handleShellConnection(
             resizePtyIfChanged(existingSession.pty, data.cols, data.rows);
           }
           sendPtySize(existingSession);
+          // mine: after a full replay, make the TUI repaint cleanly (owner only): a brief
+          // one-row size change delivers SIGWINCH even when the size is otherwise unchanged.
+          if (!canDelta && existingSession.ws === ws) {
+            const target = existingSession.pty;
+            setTimeout(() => {
+              if (existingSession.ws !== ws || ptySessionsMap.get(ptySessionKey as string) !== existingSession) return;
+              const { cols, rows } = target;
+              if (rows > 5) {
+                target.resize(cols, rows - 1);
+                setTimeout(() => target.resize(cols, rows), 30);
+              }
+            }, 120);
+          }
           sendClaudeColorScheme(ws, existingSession.claudeColorScheme);
           return;
         }
@@ -718,6 +756,8 @@ export function handleShellConnection(
           pty: shellProcess,
           ws,
           buffer: [],
+          ptyId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          bufferEndSeq: 0,
           timeoutId: null,
           projectPath,
           sessionId,
@@ -734,6 +774,8 @@ export function handleShellConnection(
             return;
           }
 
+          session.bufferEndSeq = (session.bufferEndSeq ?? session.buffer.length) + 1;
+          const chunkSeq = session.bufferEndSeq;
           if (session.buffer.length < 5000) {
             session.buffer.push(chunk);
           } else {
@@ -792,7 +834,7 @@ export function handleShellConnection(
               emitAuthUrl(bestUrl, true);
             }
 
-            const payload = JSON.stringify({ type: 'output', data: outputData });
+            const payload = JSON.stringify({ type: 'output', data: outputData, seq: chunkSeq });
             targets.forEach((target) => target.send(payload));
           }
         });
@@ -898,7 +940,12 @@ export function handleShellConnection(
     }
   });
 
-  ws.on('close', () => {
+  ws.on('close', (code: number, reason: Buffer) => {
+    const meta = shellSocketMeta.get(ws);
+    const lived = Math.round((Date.now() - connectedAt) / 1000);
+    console.log(
+      `[INFO] ${ts()} Shell websocket closed remote=${remote} code=${code} reason=${JSON.stringify(reason?.toString?.() ?? '')} duration=${lived}s heartbeatTimeout=${Boolean(meta?.heartbeatKilled)} key=${ptySessionKey ?? '-'}`
+    );
     if (!ptySessionKey) {
       return;
     }

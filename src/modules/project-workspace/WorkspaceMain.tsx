@@ -190,8 +190,9 @@ function WorkspaceMain({
             </div>
           )}
 
-          {activeTab === 'shell' && (
-            <div className="h-full w-full overflow-hidden">
+          {/* mine: keep the terminal mounted across tab switches (no reconnect/replay). */}
+          {selectedProject && (
+            <div className={`h-full w-full overflow-hidden ${activeTab === 'shell' ? '' : 'hidden'}`}>
               <StandaloneShell
                 key={selectedSession ? 'session' : `new-${newSessionTrigger}`}
                 launchKey={selectedSession ? null : `${selectedProject?.fullPath || selectedProject?.path || ''}:${newSessionTrigger}`}
