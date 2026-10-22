@@ -1,4 +1,5 @@
-import { Palette, RotateCcw, Shield, ShieldOff, X } from 'lucide-react';
+import { useRef } from 'react';
+import { Palette, Paperclip, RotateCcw, Shield, ShieldOff, X } from 'lucide-react';
 
 type ShellHeaderProps = {
   isConnected: boolean;
@@ -23,6 +24,8 @@ type ShellHeaderProps = {
   onToggleBypass: () => void;
   bypassLabel: string;
   bypassTitle: string;
+  onPickFiles?: (files: FileList | null) => void;
+  disableAttach?: boolean;
 };
 
 /** Rendered by Shell above the terminal to show connection status, the restart/disconnect actions and the theme restart hint. */
@@ -49,7 +52,10 @@ export default function ShellHeader({
   onToggleBypass,
   bypassLabel,
   bypassTitle,
+  onPickFiles,
+  disableAttach = false,
 }: ShellHeaderProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="flex-shrink-0 border-b border-border bg-card px-4 py-2">
       <div className="flex items-center justify-between">
@@ -68,6 +74,31 @@ export default function ShellHeader({
         </div>
 
         <div className="flex items-center gap-2">
+          {onPickFiles && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  onPickFiles(event.target.files);
+                  event.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disableAttach}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                title="上传文件/图片，路径会填进终端"
+                aria-label="上传文件"
+              >
+                <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </>
+          )}
+
           {showBypassToggle && (
             <button
               type="button"

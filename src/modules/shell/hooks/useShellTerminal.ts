@@ -13,6 +13,7 @@ import { copyTextToClipboard } from '@/shared/utils';
 import { TERMINAL_INIT_DELAY_MS } from '@/shared/constants';
 import { installMobileTerminalSelection } from '@/modules/shell/utils/mobileTerminalSelection';
 import { sendSocketMessage } from '@/modules/shell/utils/socket';
+import { SHELL_PASTE_FILES_EVENT } from '@/modules/shell/utils/shellUpload';
 import { ensureXtermFocusStyles } from '@/modules/shell/utils/terminalStyles';
 
 const TERMINAL_RESIZE_DELAY_MS = 50;
@@ -324,11 +325,17 @@ export function useShellTerminal({
         (event.ctrlKey || event.metaKey) &&
         event.key?.toLowerCase() === 'v'
       ) {
+        // Insecure contexts (plain http over LAN/Tailscale) have no async clipboard:
+        // let the native paste event fire so useShellFileDrop / xterm handle it.
+        if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+          return false;
+        }
+
         // Block native paste so data is only injected after clipboard-read resolves.
         event.preventDefault();
         event.stopPropagation();
 
-        if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
+        const pasteText = () =>
           navigator.clipboard
             .readText()
             .then((text) => {
@@ -338,7 +345,31 @@ export function useShellTerminal({
               });
             })
             .catch(() => {});
+
+        const readItems = navigator.clipboard.read?.bind(navigator.clipboard);
+        if (!readItems) {
+          void pasteText();
+          return false;
         }
+
+        readItems()
+          .then(async (items) => {
+            const blobs: Blob[] = [];
+            for (const item of items) {
+              const imageType = item.types.find((type) => type.startsWith('image/'));
+              if (imageType) blobs.push(await item.getType(imageType));
+            }
+            if (blobs.length === 0) {
+              await pasteText();
+              return;
+            }
+            terminalContainer.dispatchEvent(
+              new CustomEvent(SHELL_PASTE_FILES_EVENT, { detail: { files: blobs } }),
+            );
+          })
+          .catch(() => {
+            void pasteText();
+          });
 
         return false;
       }

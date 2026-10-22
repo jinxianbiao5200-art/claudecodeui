@@ -13,6 +13,7 @@ import ShellEmptyState from '@/modules/shell/ShellEmptyState';
 import ShellHeader from '@/modules/shell/ShellHeader';
 import ShellMinimalView from '@/modules/shell/ShellMinimalView';
 import TerminalShortcutsPanel from '@/modules/shell/TerminalShortcutsPanel';
+import { useShellFileDrop } from '@/modules/shell/hooks/useShellFileDrop';
 
 const SHELL_RESTART_DELAY_MS = 200;
 
@@ -190,6 +191,12 @@ export default function Shell({
     [wsRef],
   );
 
+  const { status: uploadStatus, isDragging, dropHandlers, handlePickedFiles } = useShellFileDrop({
+    containerRef: terminalContainerRef,
+    sendInput,
+    enabled: isConnected,
+  });
+
   // Null (not a label) when nothing is selected, which is what the header renders against.
   const sessionDisplayName = useMemo(
     () => (selectedSession ? getSessionTitle(selectedSession) : null),
@@ -322,9 +329,30 @@ export default function Shell({
         bypassTitle={t(
           bypassPermissions ? 'shell.actions.bypassOnTitle' : 'shell.actions.bypassOffTitle',
         )}
+        onPickFiles={handlePickedFiles}
+        disableAttach={!isConnected}
       />
 
-      <div className="relative flex-1 overflow-hidden p-2">
+      <div className="relative flex-1 overflow-hidden p-2" {...dropHandlers}>
+        {isDragging && (
+          <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-md border-2 border-dashed border-blue-500 bg-blue-500/10 text-sm font-medium text-blue-600 dark:text-blue-300">
+            拖到这里上传，路径会填进终端
+          </div>
+        )}
+
+        {uploadStatus && (
+          <div
+            role="status"
+            className={`absolute right-3 top-3 z-20 rounded-md px-3 py-1.5 text-xs font-medium shadow ${
+              uploadStatus.kind === 'error' ? 'bg-red-600 text-white' : 'border border-border bg-card text-foreground'
+            }`}
+          >
+            {uploadStatus.kind === 'uploading' && `上传中（${uploadStatus.count} 个）…`}
+            {uploadStatus.kind === 'done' && `已上传 ${uploadStatus.count} 个，路径已填入`}
+            {uploadStatus.kind === 'error' && `上传失败：${uploadStatus.message}`}
+          </div>
+        )}
+
         <div
           ref={terminalContainerRef}
           className="h-full w-full focus:outline-none"
