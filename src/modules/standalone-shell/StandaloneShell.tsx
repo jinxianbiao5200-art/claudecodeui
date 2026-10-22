@@ -19,6 +19,7 @@ type StandaloneShellProps = {
   showHeader?: boolean;
   compact?: boolean;
   minimal?: boolean;
+  launchKey?: string | null;
 };
 
 /** This module's only public export: used by the project-workspace module for its shell tab and by provider-auth to run an interactive login command. */
@@ -36,6 +37,7 @@ export default function StandaloneShell({
   showHeader = true,
   compact = false,
   minimal = false,
+  launchKey = null,
 }: StandaloneShellProps) {
   const [isCompleted, setIsCompleted] = useState(false);
 
@@ -71,6 +73,7 @@ export default function StandaloneShell({
           isActive={isActive}
           onProcessComplete={handleProcessComplete}
           minimal={minimal}
+          launchKey={launchKey}
           autoConnect={minimal ? true : autoConnect}
         />
       </div>

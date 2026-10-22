@@ -1065,8 +1065,7 @@ export function useProjectsState({
     (project: Project) => {
       setSelectedProject(project);
       setSelectedSession(null);
-      // mine: new sessions are created (and provider/model picked) in the Chat composer.
-      setActiveTab('chat');
+      setActiveTab(DEFAULT_TAB);
       setNewSessionTrigger((previous) => previous + 1);
       navigate('/');
 

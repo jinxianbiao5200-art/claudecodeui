@@ -36,9 +36,8 @@ const BASE_TABS: BuiltInTab[] = [
   { kind: 'builtin', id: 'shell', labelKey: 'tabs.shell', icon: Terminal },
   { kind: 'builtin', id: 'files', labelKey: 'tabs.files', icon: Folder },
   { kind: 'builtin', id: 'git',   labelKey: 'tabs.git',   icon: GitBranch },
+  ...(SHOW_CHAT_TAB ? [{ kind: 'builtin', id: 'chat', labelKey: 'tabs.chat', icon: MessageSquare } as BuiltInTab] : []),
 ];
-
-const CHAT_TAB: BuiltInTab = { kind: 'builtin', id: 'chat', labelKey: 'tabs.chat', icon: MessageSquare };
 
 const BROWSER_TAB: BuiltInTab = {
   kind: 'builtin',
@@ -66,8 +65,6 @@ export default function WorkspaceTabs({
 
   const builtInTabs: BuiltInTab[] = [
     ...BASE_TABS,
-    // mine: Chat is hidden, but shown while in use (new-session composer with model picker).
-    ...(SHOW_CHAT_TAB || activeTab === 'chat' ? [CHAT_TAB] : []),
     ...(shouldShowBrowserTab ? [BROWSER_TAB] : []),
     ...(shouldShowTasksTab ? [TASKS_TAB] : []),
   ];

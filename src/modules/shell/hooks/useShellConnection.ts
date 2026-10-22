@@ -7,6 +7,7 @@ import type { Project, ProjectSession } from '@/shared/types';
 import { TERMINAL_INIT_DELAY_MS } from '@/shared/constants';
 import { getShellWebSocketUrl, parseShellMessage, sendSocketMessage } from '@/modules/shell/utils/socket';
 import { readSelectedProvider } from '@/shared/selectedProvider';
+import { getActiveShellLaunch } from '@/modules/shell/utils/shellLaunch';
 
 const ANSI_ESCAPE_REGEX =
   /(?:\u001B\[[0-?]*[ -/]*[@-~]|\u009B[0-?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u009D[^\u0007\u009C]*(?:\u0007|\u009C)|\u001B[PX^_][^\u001B]*\u001B\\|[\u0090\u0098\u009E\u009F][^\u009C]*\u009C|\u001B[@-Z\\-_])/g;
@@ -165,12 +166,15 @@ export function useShellConnection({
             const forceRestart = forceRestartOnInitRef.current;
             forceRestartOnInitRef.current = false;
 
+            // mine: a fresh CLI picked in the shell's new-session picker gets its own PTY key.
+            const launch = !isPlainShellRef.current && !selectedSessionRef.current ? getActiveShellLaunch() : null;
             sendSocketMessage(socket, {
               type: 'init',
               projectPath: currentProject.fullPath || currentProject.path || '',
-              sessionId: isPlainShellRef.current ? null : selectedSessionRef.current?.id || null,
+              sessionId: isPlainShellRef.current ? null : selectedSessionRef.current?.id || launch?.launchId || null,
+              model: launch?.model,
               hasSession: isPlainShellRef.current ? false : Boolean(selectedSessionRef.current),
-              provider: isPlainShellRef.current ? 'plain-shell' : (selectedSessionRef.current?.__provider || readSelectedProvider()),
+              provider: isPlainShellRef.current ? 'plain-shell' : (selectedSessionRef.current?.__provider || launch?.provider || readSelectedProvider()),
               cols: currentTerminal.cols,
               rows: currentTerminal.rows,
               initialCommand: initialCommandRef.current,

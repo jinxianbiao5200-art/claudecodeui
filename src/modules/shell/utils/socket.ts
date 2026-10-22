@@ -16,6 +16,7 @@ type ShellInitMessage = {
   // The app theme at launch, so the server can start a CLI in the colour scheme
   // the terminal is painted in.
   colorScheme?: 'light' | 'dark';
+  model?: string;
 };
 
 type ShellResizeMessage = {

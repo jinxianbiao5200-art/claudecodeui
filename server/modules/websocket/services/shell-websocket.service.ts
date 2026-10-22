@@ -21,6 +21,8 @@ type ShellIncomingMessage = {
   forceRestart?: boolean;
   bypassPermissions?: boolean;
   colorScheme?: string;
+  /** mine: model for a NEW CLI session launched from the shell picker. */
+  model?: string;
 };
 
 type ShellColorScheme = 'light' | 'dark';
@@ -164,6 +166,7 @@ function parseShellMessage(rawMessage: RawData): ShellIncomingMessage | null {
   return payload as ShellIncomingMessage;
 }
 
+const SAFE_MODEL_PATTERN = /^[a-zA-Z0-9_.\-:\/\[\]@]+$/;
 const SAFE_SESSION_ID_PATTERN = /^[a-zA-Z0-9_.\-:]+$/;
 
 function resolveResumeSessionId(
@@ -221,6 +224,10 @@ function buildShellCommand(
     provider === 'plain-shell';
 
   const otherProgram = (command: string): ShellLaunch => ({ command, claudeFollowsAppTheme: false });
+  // mine: model flag for new (non-resumed) sessions only.
+  const rawModel = readString(message.model);
+  const model = rawModel && rawModel !== 'default' && SAFE_MODEL_PATTERN.test(rawModel) ? rawModel : '';
+  const modelFlag = (flag: string) => (model && !resumeSessionId ? ` ${flag} ${quoteShellArgument(model)}` : '');
 
   if (isPlainShell) {
     return otherProgram(initialCommand);
@@ -230,7 +237,7 @@ function buildShellCommand(
     if (resumeSessionId) {
       return otherProgram(`cursor-agent --resume="${resumeSessionId}"`);
     }
-    return otherProgram('cursor-agent');
+    return otherProgram(`cursor-agent${modelFlag('--model')}`);
   }
 
   if (provider === 'codex') {
@@ -240,14 +247,14 @@ function buildShellCommand(
       }
       return otherProgram(`codex resume "${resumeSessionId}" || codex`);
     }
-    return otherProgram('codex');
+    return otherProgram(`codex${modelFlag('-m')}`);
   }
 
   if (provider === 'opencode') {
     if (resumeSessionId) {
       return otherProgram(`opencode --session "${resumeSessionId}"`);
     }
-    return otherProgram(initialCommand || 'opencode');
+    return otherProgram(initialCommand || `opencode${modelFlag('-m')}`);
   }
 
   // Launching with the flag is what unlocks "bypass permissions" in the CLI's
@@ -268,7 +275,7 @@ function buildShellCommand(
     // A caller's own command (e.g. `claude /login`) is launched as given.
     return otherProgram(initialCommand);
   }
-  return { command: `claude${launchFlags}`, claudeFollowsAppTheme: theme.followsAppTheme };
+  return { command: `claude${modelFlag('--model')}${launchFlags}`, claudeFollowsAppTheme: theme.followsAppTheme };
 }
 
 // Claude Code's built-in theme ids (the `/theme` picker of CLI 2.1.280). A

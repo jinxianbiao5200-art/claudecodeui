@@ -14,6 +14,11 @@ import ShellHeader from '@/modules/shell/ShellHeader';
 import ShellMinimalView from '@/modules/shell/ShellMinimalView';
 import TerminalShortcutsPanel from '@/modules/shell/TerminalShortcutsPanel';
 import { useShellFileDrop } from '@/modules/shell/hooks/useShellFileDrop';
+import ShellNewSessionPicker from '@/modules/shell/ShellNewSessionPicker';
+import { getShellLaunch, setActiveShellLaunch, setShellLaunch } from '@/modules/shell/utils/shellLaunch';
+import type { ShellLaunch } from '@/modules/shell/utils/shellLaunch';
+import { writeSelectedProvider } from '@/shared/selectedProvider';
+import type { LLMProvider } from '@/shared/types';
 
 const SHELL_RESTART_DELAY_MS = 200;
 
@@ -35,6 +40,8 @@ type ShellProps = {
   minimal?: boolean;
   autoConnect?: boolean;
   isActive?: boolean;
+  /** mine: identifies one "new session" click so its picked launch survives tab switches. */
+  launchKey?: string | null;
 };
 
 /** Exported through the shell barrel: the standalone-shell module renders it as a full-page terminal and the task-master module embeds it in its setup modal to run TaskMaster's init command. */
@@ -47,7 +54,28 @@ export default function Shell({
   minimal = false,
   autoConnect = false,
   isActive = true,
+  launchKey = null,
 }: ShellProps) {
+  // mine: a session-less shell first shows a provider/model picker, then starts a fresh CLI.
+  const isNewSession = !selectedSession && !isPlainShell && !minimal && Boolean(launchKey);
+  const [launch, setLaunch] = useState<ShellLaunch | null>(() => (launchKey ? getShellLaunch(launchKey) : null));
+  setActiveShellLaunch(isNewSession ? launch : null);
+  const handleStartNewSession = useCallback(
+    (provider: LLMProvider, model: string) => {
+      if (!launchKey) return;
+      writeSelectedProvider(provider);
+      try {
+        localStorage.setItem(`${provider}-model`, model);
+      } catch {
+        // ignore
+      }
+      const next: ShellLaunch = { provider, model, launchId: `new-${Date.now().toString(36)}` };
+      setShellLaunch(launchKey, next);
+      setActiveShellLaunch(next);
+      setLaunch(next);
+    },
+    [launchKey],
+  );
   const { t } = useTranslation('chat');
   const [isRestarting, setIsRestarting] = useState(false);
   // Seeded from the chat composer's persisted permission setting; the header
@@ -78,7 +106,7 @@ export default function Shell({
     isPlainShell,
     bypassPermissions,
     minimal,
-    autoConnect,
+    autoConnect: autoConnect && (!isNewSession || Boolean(launch)),
     isRestarting,
     onProcessComplete,
     onOutputRef,
@@ -225,7 +253,7 @@ export default function Shell({
 
   const shellProvider = isPlainShell
     ? 'plain-shell'
-    : selectedSession?.__provider || readSelectedProvider();
+    : selectedSession?.__provider || launch?.provider || readSelectedProvider();
 
   const handleToggleBypassPermissions = useCallback(() => {
     setBypassPermissions((enabled) => !enabled);
@@ -359,7 +387,13 @@ export default function Shell({
           style={{ outline: 'none' }}
         />
 
-        {overlayMode && (
+        {isNewSession && !launch && (
+          <div className="absolute inset-0 z-30 bg-card">
+            <ShellNewSessionPicker projectName={selectedProject.displayName} onStart={handleStartNewSession} />
+          </div>
+        )}
+
+        {overlayMode && !(isNewSession && !launch) && (
           <ShellConnectionOverlay
             mode={overlayMode}
             description={overlayDescription}

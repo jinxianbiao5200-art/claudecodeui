@@ -193,6 +193,8 @@ function WorkspaceMain({
           {activeTab === 'shell' && (
             <div className="h-full w-full overflow-hidden">
               <StandaloneShell
+                key={selectedSession ? 'session' : `new-${newSessionTrigger}`}
+                launchKey={selectedSession ? null : `${selectedProject?.fullPath || selectedProject?.path || ''}:${newSessionTrigger}`}
                 project={selectedProject}
                 session={selectedSession}
                 showHeader={false}
