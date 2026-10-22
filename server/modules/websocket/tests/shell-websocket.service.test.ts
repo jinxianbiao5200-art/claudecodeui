@@ -776,3 +776,28 @@ test('mine: a second client joins as viewer, gets output, cannot resize, and tak
   assert.deepEqual(sizes, [[45, 30]]);
   pty.emitExit();
 });
+
+test('mine: a full reattach gets a headless-terminal snapshot instead of raw history', async () => {
+  const pty = createFakePty();
+  const dependencies = { resolveProviderSessionId: () => null, spawnPty: () => pty as never };
+  const init = JSON.stringify({
+    type: 'init', projectPath: process.cwd(), sessionId: `snapshot-${process.pid}`, hasSession: false,
+    provider: 'plain-shell', isPlainShell: true, initialCommand: 'test-command', cols: 40, rows: 10,
+  });
+  const first = createFakeSocket();
+  handleShellConnection(first as never, dependencies);
+  first.emit('message', init);
+  pty.emitData('old line\r\n');
+  pty.emitData('\x1b[2J\x1b[Hfresh screen');
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  first.emit('close');
+  const second = createFakeSocket();
+  handleShellConnection(second as never, dependencies);
+  second.emit('message', init);
+  const outputs = second.frames.filter((f: string) => f.includes('"output"')).map((f: string) => JSON.parse(f).data as string);
+  assert.ok(second.frames.some((f: string) => f.includes('"replay"') && f.includes('"full"')));
+  assert.equal(outputs.length, 1);
+  assert.match(outputs[0], /fresh screen/);
+  assert.doesNotMatch(outputs[0], /\x1b\[2J/);
+  pty.emitExit();
+});

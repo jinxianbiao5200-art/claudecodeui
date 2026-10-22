@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
+import { createRequire } from 'node:module';
 
 import { parseIncomingJsonObject, stripAnsiSequences } from '@/shared/utils.js';
 
@@ -47,6 +48,50 @@ type PtySessionEntry = {
 
 const ptySessionsMap = new Map<string, PtySessionEntry>();
 
+// mine: a headless terminal mirrors each PTY at its real size, so a (re)attaching client
+// gets a clean snapshot of the current screen instead of raw history drawn at mixed widths.
+// Loaded untyped on purpose: the packages' typings pull DOM globals into the server build.
+type HeadlessTerminal = { write(data: string, cb?: () => void): void; resize(cols: number, rows: number): void; loadAddon(addon: unknown): void; dispose(): void };
+type Serializer = { serialize(): string };
+type PtyMirror = { term: HeadlessTerminal; serializer: Serializer; parsedSeq: number };
+const requireCjs = createRequire(import.meta.url);
+let xtermHeadless: { Terminal: new (options: Record<string, unknown>) => HeadlessTerminal } | null = null;
+let xtermSerialize: { SerializeAddon: new () => Serializer } | null = null;
+try {
+  xtermHeadless = requireCjs('@xterm/headless');
+  xtermSerialize = requireCjs('@xterm/addon-serialize');
+} catch (error) {
+  console.error('[WARN] @xterm/headless not available, reattach falls back to raw replay:', error instanceof Error ? error.message : error);
+}
+const ptyMirrors = new WeakMap<object, PtyMirror>();
+
+export function createPtyMirror(target: IPty, cols: number, rows: number): PtyMirror | null {
+  if (!xtermHeadless || !xtermSerialize) return null;
+  try {
+    const term = new xtermHeadless.Terminal({ cols: Math.max(cols || 80, 2), rows: Math.max(rows || 24, 2), scrollback: 2000, allowProposedApi: true });
+    const serializer = new xtermSerialize.SerializeAddon();
+    term.loadAddon(serializer);
+    const mirror = { term, serializer, parsedSeq: 0 };
+    ptyMirrors.set(target, mirror);
+    return mirror;
+  } catch (error) {
+    console.error('[WARN] headless mirror unavailable:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+// Synchronous: serializes what the mirror has parsed so far (up to parsedSeq); chunks the
+// parser has not reached yet are sent raw after the snapshot by the caller.
+function snapshotPty(target: IPty): { data: string; seq: number } | null {
+  const mirror = ptyMirrors.get(target);
+  if (!mirror) return null;
+  try {
+    return { data: mirror.serializer.serialize(), seq: mirror.parsedSeq };
+  } catch {
+    return null;
+  }
+}
+
 // mine: per-socket diagnostics (remote address, killed by heartbeat).
 export const shellSocketMeta = new WeakMap<object, { remote?: string; heartbeatKilled?: boolean }>();
 
@@ -80,6 +125,7 @@ export function resizePtyIfChanged(target: IPty | null | undefined, rawCols: unk
   }
   if (target.cols === cols && target.rows === rows) return false;
   target.resize(cols, rows);
+  ptyMirrors.get(target)?.term.resize(cols, rows);
   return true;
 }
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
@@ -656,7 +702,10 @@ export function handleShellConnection(
           ws.send(JSON.stringify({ type: 'replay', mode: canDelta ? 'delta' : 'full', ptyId: existingSession.ptyId, seq: endSeq, cols: existingSession.pty.cols, rows: existingSession.pty.rows }));
           console.log(`[INFO] ${ts()} Shell reattach key=${ptySessionKey} remote=${remote} replay=${canDelta ? `delta(${endSeq - resumeSeq})` : `full(${existingSession.buffer.length})`}`);
 
-          if (!canDelta) {
+          const snapshot = canDelta ? null : snapshotPty(existingSession.pty);
+          if (snapshot !== null) {
+            ws.send(JSON.stringify({ type: 'output', data: snapshot.data, seq: snapshot.seq }));
+          } else if (!canDelta) {
             ws.send(
               JSON.stringify({
                 type: 'output',
@@ -665,7 +714,8 @@ export function handleShellConnection(
             );
           }
 
-          const fromIndex = canDelta ? existingSession.buffer.length - (endSeq - resumeSeq) : 0;
+          // a snapshot already contains everything; output that raced in during it is sent live.
+          const fromIndex = snapshot !== null ? Math.max(0, existingSession.buffer.length - (endSeq - snapshot.seq)) : canDelta ? existingSession.buffer.length - (endSeq - resumeSeq) : 0;
           existingSession.buffer.slice(fromIndex).forEach((bufferedData, offset) => {
             ws.send(
               JSON.stringify({
@@ -764,7 +814,15 @@ export function handleShellConnection(
           claudeColorScheme,
         });
 
+        const spawnedPty = shellProcess;
+        const mirror = createPtyMirror(spawnedPty, readNumber(data.cols, 80), readNumber(data.rows, 24));
         shellProcess.onData((chunk) => {
+          if (mirror) {
+            const chunkMirrorSeq = (ptySessionsMap.get(ptySessionKey ?? '')?.bufferEndSeq ?? 0) + 1;
+            mirror.term.write(chunk, () => {
+              mirror.parsedSeq = Math.max(mirror.parsedSeq, chunkMirrorSeq);
+            });
+          }
           if (!ptySessionKey) {
             return;
           }
@@ -867,6 +925,11 @@ export function handleShellConnection(
 
           ptySessionsMap.delete(ptySessionKey);
           shellProcess = null;
+          const exitedMirror = ptyMirrors.get(spawnedPty);
+          if (exitedMirror) {
+            ptyMirrors.delete(spawnedPty);
+            exitedMirror.term.dispose();
+          }
         });
 
         let welcomeMsg = `\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`;
