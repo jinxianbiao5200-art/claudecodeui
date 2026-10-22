@@ -118,7 +118,8 @@ export function useShellConnection({
           // the buffered TUI output is not drawn over old screen content or at a wrong width.
           const term = terminalRef.current;
           if (term) {
-            term.reset();
+            if (typeof term.reset === 'function') term.reset();
+            else clearTerminalScreen();
             const cols = Number(message.cols);
             const rows = Number(message.rows);
             if (cols > 0 && rows > 0 && (term.cols !== cols || term.rows !== rows)) term.resize(cols, rows);
@@ -208,7 +209,8 @@ export function useShellConnection({
           if (clearOnNextOpenRef.current && !ptyIdRef.current) {
             // server without resumable replay (older build): it replays everything, so reset first.
             clearOnNextOpenRef.current = false;
-            terminalRef.current?.reset();
+            if (typeof terminalRef.current?.reset === 'function') terminalRef.current.reset();
+            else clearTerminalScreen();
           }
           setIsConnected(true);
           setIsConnecting(false);
