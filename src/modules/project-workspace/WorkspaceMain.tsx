@@ -15,6 +15,7 @@ import { EditorSidebar, useEditorSidebar } from '@/modules/code-editor';
 import WorkspaceHeader from '@/modules/project-workspace/WorkspaceHeader';
 import WorkspaceStateView from '@/modules/project-workspace/WorkspaceStateView';
 import WorkspaceErrorBoundary from '@/modules/project-workspace/WorkspaceErrorBoundary';
+import { DEFAULT_TAB } from '@/modules/project-workspace/defaultTab';
 
 type WorkspaceMainProps = {
   selectedProject: Project | null;
@@ -95,13 +96,13 @@ function WorkspaceMain({
 
   useEffect(() => {
     if (!shouldShowTasksTab && activeTab === 'tasks') {
-      setActiveTab('chat');
+      setActiveTab(DEFAULT_TAB);
     }
   }, [shouldShowTasksTab, activeTab, setActiveTab]);
 
   useEffect(() => {
     if (!shouldShowBrowserTab && activeTab === 'browser') {
-      setActiveTab('chat');
+      setActiveTab(DEFAULT_TAB);
     }
   }, [shouldShowBrowserTab, activeTab, setActiveTab]);
 

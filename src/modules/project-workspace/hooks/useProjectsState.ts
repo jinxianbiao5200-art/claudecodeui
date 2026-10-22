@@ -10,6 +10,7 @@ import type { ServerEvent,
   ProjectSession,IsSessionProcessing } from '@/shared/types';
 import { mergeProjectSelectionMetadata } from '@/modules/project-workspace/utils/projectSelectionMetadata';
 import { readSelectedProvider } from '@/shared/selectedProvider';
+import { DEFAULT_TAB, SHOW_CHAT_TAB } from '@/modules/project-workspace/defaultTab';
 
 type UseProjectsStateArgs = {
   sessionId?: string;
@@ -371,12 +372,13 @@ const readPersistedTab = (): AppTab => {
   try {
     const stored = localStorage.getItem('activeTab');
     if (stored && isValidTab(stored)) {
+      if (stored === 'chat' && !SHOW_CHAT_TAB) return DEFAULT_TAB;
       return stored as AppTab;
     }
   } catch {
     // localStorage unavailable
   }
-  return 'chat';
+  return DEFAULT_TAB;
 };
 
 export function useProjectsState({
@@ -1037,8 +1039,8 @@ export function useProjectsState({
       clearSessionAttention(session.id);
       setSelectedSession(session);
 
-      if (activeTab === 'tasks' || activeTab === 'browser') {
-        setActiveTab('chat');
+      if (activeTab === 'tasks' || activeTab === 'browser' || (activeTab === 'chat' && !SHOW_CHAT_TAB)) {
+        setActiveTab(DEFAULT_TAB);
       }
 
       if (isMobile) {
@@ -1063,7 +1065,7 @@ export function useProjectsState({
     (project: Project) => {
       setSelectedProject(project);
       setSelectedSession(null);
-      setActiveTab('chat');
+      setActiveTab(DEFAULT_TAB);
       setNewSessionTrigger((previous) => previous + 1);
       navigate('/');
 

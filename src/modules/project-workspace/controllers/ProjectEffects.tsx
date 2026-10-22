@@ -4,6 +4,7 @@ import { usePaletteOpsRegister } from '@/modules/command-palette';
 import { writeSelectedProvider } from '@/shared/selectedProvider';
 import { useProjectEffectsState } from '@/modules/project-workspace/context/ProjectsStateContext';
 import type { LLMProvider, ProjectWorkspaceShellProps } from '@/shared/types';
+import { DEFAULT_TAB } from '@/modules/project-workspace/defaultTab';
 
 /** Headless controller rendered by ProjectWorkspaceShell to register palette operations and handle service-worker navigation messages. */
 export default function ProjectEffects({
@@ -36,7 +37,7 @@ export default function ProjectEffects({
         writeSelectedProvider(message.provider as LLMProvider);
       }
 
-      setActiveTab('chat');
+      setActiveTab(DEFAULT_TAB);
       setSidebarOpen(false);
       void refreshProjectsSilently();
 

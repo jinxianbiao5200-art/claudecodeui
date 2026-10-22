@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Tooltip, PillBar, Pill } from '@/shared/ui';
 import type { AppTab } from '@/shared/types';
 import { usePlugins,PluginIcon } from '@/modules/plugins';
+import { SHOW_CHAT_TAB } from '@/modules/project-workspace/defaultTab';
 
 type WorkspaceTabsProps = {
   activeTab: AppTab;
@@ -32,10 +33,10 @@ type PluginTab = {
 type TabDefinition = BuiltInTab | PluginTab;
 
 const BASE_TABS: BuiltInTab[] = [
-  { kind: 'builtin', id: 'chat',  labelKey: 'tabs.chat',  icon: MessageSquare },
   { kind: 'builtin', id: 'shell', labelKey: 'tabs.shell', icon: Terminal },
   { kind: 'builtin', id: 'files', labelKey: 'tabs.files', icon: Folder },
   { kind: 'builtin', id: 'git',   labelKey: 'tabs.git',   icon: GitBranch },
+  ...(SHOW_CHAT_TAB ? [{ kind: 'builtin', id: 'chat', labelKey: 'tabs.chat', icon: MessageSquare } as BuiltInTab] : []),
 ];
 
 const BROWSER_TAB: BuiltInTab = {
