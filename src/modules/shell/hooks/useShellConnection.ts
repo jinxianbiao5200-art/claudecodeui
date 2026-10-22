@@ -67,6 +67,12 @@ export function useShellConnection({
   const connectingRef = useRef(false);
   const forceRestartOnInitRef = useRef(false);
   const suppressAutoConnectRef = useRef(false);
+  // mine: auto-reconnect after an unexpected drop (sleep, Wi-Fi change, heartbeat kill).
+  const [reconnectNonce, setReconnectNonce] = useState(0);
+  const wantReconnectRef = useRef(false);
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const clearOnNextOpenRef = useRef(false);
 
   const handleProcessCompletion = useCallback(
     (output: string) => {
@@ -175,6 +181,12 @@ export function useShellConnection({
         wsRef.current = socket;
 
         socket.onopen = () => {
+          reconnectAttemptRef.current = 0;
+          if (clearOnNextOpenRef.current) {
+            // the server replays its buffer on reattach; start from a clean screen.
+            clearOnNextOpenRef.current = false;
+            clearTerminalScreen();
+          }
           setIsConnected(true);
           setIsConnecting(false);
           connectingRef.current = false;
@@ -220,11 +232,26 @@ export function useShellConnection({
         };
 
         socket.onclose = () => {
+          const unexpected = wsRef.current === socket && !suppressAutoConnectRef.current;
           setIsConnected(false);
           setIsConnecting(false);
           setClaudeLaunchColorScheme(null);
           connectingRef.current = false;
-          clearTerminalScreen();
+          if (!unexpected) {
+            clearTerminalScreen();
+            return;
+          }
+          // mine: keep the last screen visible and reconnect with backoff.
+          wsRef.current = null;
+          wantReconnectRef.current = true;
+          clearOnNextOpenRef.current = true;
+          const attempt = reconnectAttemptRef.current++;
+          const delay = Math.min(1000 * 2 ** attempt, 15000);
+          if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = window.setTimeout(() => {
+            reconnectTimerRef.current = null;
+            setReconnectNonce((n) => n + 1);
+          }, delay);
         };
 
         socket.onerror = () => {
@@ -269,6 +296,13 @@ export function useShellConnection({
   }, [connectWebSocket, isConnected, isConnecting, isInitialized]);
 
   const disconnectFromShell = useCallback((options?: { suppressAutoConnect?: boolean }) => {
+    wantReconnectRef.current = false;
+    reconnectAttemptRef.current = 0;
+    clearOnNextOpenRef.current = false;
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (options?.suppressAutoConnect) {
       suppressAutoConnectRef.current = true;
     }
@@ -295,6 +329,33 @@ export function useShellConnection({
 
     connectToShell();
   }, [autoConnect, connectToShell, isConnected, isConnecting, isInitialized]);
+
+  // mine: retry an unexpectedly dropped socket (timer tick, tab visible again, back online).
+  useEffect(() => {
+    if (!wantReconnectRef.current || suppressAutoConnectRef.current || !isInitialized || isConnecting || isConnected) {
+      return;
+    }
+    connectToShell();
+  }, [connectToShell, isConnected, isConnecting, isInitialized, reconnectNonce]);
+
+  useEffect(() => {
+    const kick = () => {
+      if (document.visibilityState === 'hidden') return;
+      if (wantReconnectRef.current && !wsRef.current) {
+        reconnectAttemptRef.current = 0;
+        setReconnectNonce((n) => n + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', kick);
+    window.addEventListener('focus', kick);
+    window.addEventListener('online', kick);
+    return () => {
+      document.removeEventListener('visibilitychange', kick);
+      window.removeEventListener('focus', kick);
+      window.removeEventListener('online', kick);
+      if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current);
+    };
+  }, [wsRef]);
 
   return {
     isConnected,

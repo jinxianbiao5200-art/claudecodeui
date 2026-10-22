@@ -750,7 +750,7 @@ test('other shells and initial commands only get the COLORFGBG hint', () => {
 });
 
 test('mine: a second client joins as viewer, gets output, cannot resize, and takes over by typing', () => {
-  const pty = createFakePty() as ReturnType<typeof createFakePty> & { cols?: number; rows?: number; resize?: (c: number, r: number) => void };
+  const pty = createFakePty() as unknown as Omit<ReturnType<typeof createFakePty>, "resize" | "cols" | "rows"> & { cols: number; rows: number; resize: (c: number, r: number) => void };
   const sizes: Array<[number, number]> = [];
   pty.cols = 120; pty.rows = 40;
   pty.resize = (c: number, r: number) => { sizes.push([c, r]); pty.cols = c; pty.rows = r; };
