@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 
 import { api } from '@/shared/api';
 import type { LLMProvider, ProviderModelsDefinition } from '@/shared/types';
-import { readSelectedProvider } from '@/shared/selectedProvider';
 
 const PROVIDERS: { id: LLMProvider; label: string }[] = [
   { id: 'claude', label: 'Claude Code' },
@@ -18,9 +17,9 @@ type Props = {
 
 /** mine: pre-launch screen for a new session in the Shell tab (no chat composer). */
 export default function ShellNewSessionPicker({ projectName, onStart }: Props) {
-  const [provider, setProvider] = useState<LLMProvider>(readSelectedProvider);
+  const [provider, setProvider] = useState<LLMProvider>('claude');
   const [catalog, setCatalog] = useState<ProviderModelsDefinition | null>(null);
-  const [model, setModel] = useState<string>(() => localStorage.getItem(`${readSelectedProvider()}-model`) || 'default');
+  const [model, setModel] = useState<string>('opus');
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +31,8 @@ export default function ShellNewSessionPicker({ projectName, onStart }: Props) {
         const models: ProviderModelsDefinition | undefined = body?.success ? body.data?.models : undefined;
         if (cancelled || !models) return;
         setCatalog(models);
-        const stored = localStorage.getItem(`${provider}-model`);
+        // mine: new sessions always default to Claude Code + Opus.
+        const stored = provider === 'claude' ? 'opus' : localStorage.getItem(`${provider}-model`);
         const valid = models.OPTIONS.some((o) => o.value === stored);
         setModel(valid && stored ? stored : models.DEFAULT || models.OPTIONS[0]?.value || 'default');
       } catch {
