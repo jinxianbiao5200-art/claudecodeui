@@ -80,8 +80,10 @@ test('a stale socket close cannot detach the socket that replaced it', () => {
   pty.emitData('output-after-stale-close');
 
   assert.equal(pty.killed, false);
-  assert.equal(replacementSocket.frames.length, 1);
-  assert.match(replacementSocket.frames[0], /output-after-stale-close/);
+  // mine: the replacement may also get a pty_size frame when it is promoted to owner.
+  const outputFrames = replacementSocket.frames.filter((frame: string) => frame.includes('"output"'));
+  assert.equal(outputFrames.length, 1);
+  assert.match(outputFrames[0], /output-after-stale-close/);
 
   pty.emitExit();
 });
@@ -745,4 +747,32 @@ test('other shells and initial commands only get the COLORFGBG hint', () => {
       ['0;15', '0;15', '0;15', '15;0']
     );
   });
+});
+
+test('mine: a second client joins as viewer, gets output, cannot resize, and takes over by typing', () => {
+  const pty = createFakePty() as ReturnType<typeof createFakePty> & { cols?: number; rows?: number; resize?: (c: number, r: number) => void };
+  const sizes: Array<[number, number]> = [];
+  pty.cols = 120; pty.rows = 40;
+  pty.resize = (c: number, r: number) => { sizes.push([c, r]); pty.cols = c; pty.rows = r; };
+  const dependencies = { resolveProviderSessionId: () => null, spawnPty: () => pty as never };
+  const init = (cols: number, rows: number) => JSON.stringify({
+    type: 'init', projectPath: process.cwd(), sessionId: `viewer-${process.pid}`, hasSession: false,
+    provider: 'plain-shell', isPlainShell: true, initialCommand: 'test-command', cols, rows,
+  });
+  const desktop = createFakeSocket();
+  handleShellConnection(desktop as never, dependencies);
+  desktop.emit('message', init(120, 40));
+  const phone = createFakeSocket();
+  handleShellConnection(phone as never, dependencies);
+  phone.emit('message', init(45, 30));
+  assert.deepEqual(sizes, []);
+  phone.emit('message', JSON.stringify({ type: 'resize', cols: 45, rows: 30 }));
+  assert.deepEqual(sizes, []);
+  desktop.frames.length = 0; phone.frames.length = 0;
+  pty.emitData('both-see-this');
+  assert.ok(desktop.frames.some((f: string) => f.includes('both-see-this')));
+  assert.ok(phone.frames.some((f: string) => f.includes('both-see-this')));
+  phone.emit('message', JSON.stringify({ type: 'input', data: 'x' }));
+  assert.deepEqual(sizes, [[45, 30]]);
+  pty.emitExit();
 });

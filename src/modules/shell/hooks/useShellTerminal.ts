@@ -1,3 +1,4 @@
+import { viewerSockets } from '@/modules/shell/utils/ptyOwnership';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import { ClipboardAddon, type IClipboardProvider } from '@xterm/addon-clipboard';
@@ -29,6 +30,7 @@ function fitAndSendResize(
   send: (ws: WebSocket | null, msg: { type: 'resize'; cols: number; rows: number }) => void,
   force = false,
 ): void {
+  if (ws && viewerSockets.has(ws)) return;
   const el = terminal.element?.parentElement ?? terminal.element;
   if (el && (el.clientWidth < 40 || el.clientHeight < 40)) return;
   const proposed = fitAddon.proposeDimensions?.();

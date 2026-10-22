@@ -383,7 +383,7 @@ export default function Shell({
 
         <div
           ref={terminalContainerRef}
-          className="h-full w-full focus:outline-none"
+          className="h-full w-full overflow-x-auto focus:outline-none"
           style={{ outline: 'none' }}
         />
 

@@ -30,6 +30,8 @@ type ShellColorScheme = 'light' | 'dark';
 type PtySessionEntry = {
   pty: IPty;
   ws: WebSocket | null;
+  // mine: other attached clients that only watch (receive output, never resize).
+  viewers?: Set<WebSocket>;
   buffer: string[];
   timeoutId: NodeJS.Timeout | null;
   projectPath: string;
@@ -41,6 +43,22 @@ type PtySessionEntry = {
 };
 
 const ptySessionsMap = new Map<string, PtySessionEntry>();
+
+// mine: every open socket attached to a PTY (owner first, then viewers).
+function attachedSockets(session: PtySessionEntry): WebSocket[] {
+  const list: WebSocket[] = [];
+  if (session.ws && session.ws.readyState === WebSocket.OPEN) list.push(session.ws);
+  session.viewers?.forEach((viewer) => {
+    if (viewer !== session.ws && viewer.readyState === WebSocket.OPEN) list.push(viewer);
+  });
+  return list;
+}
+
+function sendPtySize(session: PtySessionEntry): void {
+  for (const socket of attachedSockets(session)) {
+    socket.send(JSON.stringify({ type: 'pty_size', cols: session.pty.cols, rows: session.pty.rows, owner: socket === session.ws }));
+  }
+}
 
 // mine: ignore bogus/transient sizes and no-op resizes (each resize makes TUIs redraw).
 export function resizePtyIfChanged(target: IPty | null | undefined, rawCols: unknown, rawRows: unknown): boolean {
@@ -633,9 +651,16 @@ export function handleShellConnection(
             });
           }
 
-          existingSession.ws = ws;
-          // mine: the newest client owns the PTY size; adopt its geometry once on attach.
-          resizePtyIfChanged(existingSession.pty, data.cols, data.rows);
+          // mine: attaching never steals an active owner; it joins as a viewer.
+          const currentOwner = existingSession.ws;
+          if (currentOwner && currentOwner !== ws && currentOwner.readyState === WebSocket.OPEN) {
+            (existingSession.viewers ??= new Set()).add(ws);
+          } else {
+            existingSession.ws = ws;
+            existingSession.viewers?.delete(ws);
+            resizePtyIfChanged(existingSession.pty, data.cols, data.rows);
+          }
+          sendPtySize(existingSession);
           sendClaudeColorScheme(ws, existingSession.claudeColorScheme);
           return;
         }
@@ -716,7 +741,8 @@ export function handleShellConnection(
             session.buffer.push(chunk);
           }
 
-          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+          const targets = attachedSockets(session);
+          if (targets.length > 0) {
             let outputData = chunk;
             const cleanChunk = stripAnsiSequences(chunk);
             urlDetectionBuffer = `${urlDetectionBuffer}${cleanChunk}`.slice(-SHELL_URL_PARSE_BUFFER_LIMIT);
@@ -766,12 +792,8 @@ export function handleShellConnection(
               emitAuthUrl(bestUrl, true);
             }
 
-            session.ws.send(
-              JSON.stringify({
-                type: 'output',
-                data: outputData,
-              })
-            );
+            const payload = JSON.stringify({ type: 'output', data: outputData });
+            targets.forEach((target) => target.send(payload));
           }
         });
 
@@ -785,6 +807,7 @@ export function handleShellConnection(
             return;
           }
 
+          if (session) attachedSockets(session).filter((t) => t !== session.ws).forEach((t) => t.send(JSON.stringify({ type: 'output', data: `\r\n\x1b[33mProcess exited with code ${exitCode.exitCode}\x1b[0m\r\n` })));
           if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
             session.ws.send(
               JSON.stringify({
@@ -835,8 +858,13 @@ export function handleShellConnection(
           // (output + size follow the most recently active client, no ping-pong).
           const owner = ptySessionKey ? ptySessionsMap.get(ptySessionKey) : undefined;
           if (owner && owner.pty === shellProcess && owner.ws !== ws && ws.readyState === WebSocket.OPEN) {
+            const previous = owner.ws;
+            owner.viewers ??= new Set();
+            owner.viewers.delete(ws);
+            if (previous && previous.readyState === WebSocket.OPEN) owner.viewers.add(previous);
             owner.ws = ws;
             if (clientSize) resizePtyIfChanged(shellProcess, clientSize.cols, clientSize.rows);
+            sendPtySize(owner);
           }
           shellProcess.write(readString(data.data));
         }
@@ -883,10 +911,19 @@ export function handleShellConnection(
     // Mobile networks can deliver an old socket's close after its replacement
     // has attached. Only the socket that currently owns the PTY may detach it.
     if (session.ws !== ws) {
+      session.viewers?.delete(ws);
       return;
     }
 
     session.ws = null;
+    // mine: hand the PTY to a remaining viewer (size unchanged until it types).
+    const nextOwner = [...(session.viewers ?? [])].find((v) => v.readyState === WebSocket.OPEN);
+    if (nextOwner) {
+      session.viewers?.delete(nextOwner);
+      session.ws = nextOwner;
+      sendPtySize(session);
+      return;
+    }
     if (session.timeoutId) {
       clearTimeout(session.timeoutId);
     }

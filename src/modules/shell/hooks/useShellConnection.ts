@@ -1,3 +1,4 @@
+import { viewerSockets } from '@/modules/shell/utils/ptyOwnership';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import type { FitAddon } from '@xterm/addon-fit';
@@ -122,12 +123,36 @@ export function useShellConnection({
         return;
       }
 
+      if (message.type === 'pty_size') {
+        // mine: shared PTY ownership. Viewers render at the owner's size and never resize.
+        const cols = Number(message.cols);
+        const rows = Number(message.rows);
+        const socket = wsRef.current;
+        if (!socket) return;
+        if (message.owner === true) {
+          viewerSockets.delete(socket);
+          const fit = fitAddonRef.current;
+          const term = terminalRef.current;
+          if (fit && term) {
+            fit.fit();
+            sendSocketMessage(socket, { type: 'resize', cols: term.cols, rows: term.rows });
+          }
+        } else {
+          viewerSockets.add(socket);
+          if (Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
+            const term = terminalRef.current;
+            if (term && (term.cols !== cols || term.rows !== rows)) term.resize(cols, rows);
+          }
+        }
+        return;
+      }
+
       if (message.type === 'claude_theme') {
         const { colorScheme } = message;
         setClaudeLaunchColorScheme(colorScheme === 'light' || colorScheme === 'dark' ? colorScheme : null);
       }
     },
-    [handleProcessCompletion, onOutputRef, terminalRef],
+    [fitAddonRef, handleProcessCompletion, onOutputRef, terminalRef, wsRef],
   );
 
   const connectWebSocket = useCallback(
